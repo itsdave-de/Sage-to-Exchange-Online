@@ -16,12 +16,6 @@ CSV_PATH_ANSPRECHPARTNER = 'ansprechpartner_exchange_online.csv'
 CSV_PATH_ADRESSEN = 'adressen_exchange_online.csv'
 CONTROL_FILE = 'contacts_control.json'
 
-batch_add = []
-map_hash = []
-
-# Authentication and token retrieval
-credential = ClientSecretCredential(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, tenant_id=TENANT_ID)
-token = credential.get_token('https://graph.microsoft.com/.default').token
 
 # Function to load the control file
 def load_control_file():
@@ -39,9 +33,12 @@ def save_control_file(data):
 # Function to get all contacts from the folder
 def get_all_contacts_from_folder(folder_id):
     headers = {
-        'Authorization': f'Bearer {token}'
+        'Authorization': 'Bearer %' % token
     }
-    endpoint = f'https://graph.microsoft.com/v1.0/users/{SHARED_MAILBOX_EMAIL}/contactFolders/{folder_id}/contacts?$select=id&$top=10000'
+    endpoint = 'https://graph.microsoft.com/v1.0/users/%s/contactFolders/%s/contacts?$select=id&$top=1000' % (
+        SHARED_MAILBOX_EMAIL,
+        folder_id
+    )
     all_contacts = []
     while endpoint:
         response = requests.get(endpoint, headers=headers).json()
@@ -50,6 +47,7 @@ def get_all_contacts_from_folder(folder_id):
         endpoint = response.get('@odata.nextLink', None)
     return all_contacts
 
+
 # Function to generate an MD5 hash
 def generate_md5_hash(entry):
     """Generate MD5 hash from the contact dict entry"""
@@ -57,11 +55,15 @@ def generate_md5_hash(entry):
         json.dumps(entry).encode()
     ).hexdigest()
 
+
 def get_folder_id_by_name(mailbox_email, folder_name):
     headers = {
-        'Authorization': f'Bearer {token}'
+        'Authorization': 'Bearer %s' % token
     }
-    endpoint = f'https://graph.microsoft.com/v1.0/users/{mailbox_email}/contactFolders?$filter=displayName eq \'{folder_name}\''
+    endpoint = 'https://graph.microsoft.com/v1.0/users/%s/contactFolders?$filter=displayName eq \'%s\'' % (
+        mailbox_email,
+        folder_name
+    )
     response = requests.get(endpoint, headers=headers).json()
     
     if 'value' in response and len(response['value']) > 0:
@@ -69,8 +71,9 @@ def get_folder_id_by_name(mailbox_email, folder_name):
     else:
         return None
 
+
 # Function to map CSV data to Microsoft Graph's contact format
-def map_csv_to_contact_data_bom_treated(csv_data):
+def map_csv(csv_data):
     # Check if the record is a separator line or invalid
     if all(v == "--------" for v in csv_data.values()):
         return None
@@ -88,7 +91,7 @@ def map_csv_to_contact_data_bom_treated(csv_data):
         given_name = ""
         surname = ""
     mapped_data = {
-        'displayName': (last_name or f"{given_name} {surname}".strip()).replace(";", ""),
+        'displayName': (last_name or "%s %s" % (given_name, surname).strip()).replace(";", ""),
         'givenName': given_name if given_name else None,
         'surname': surname if surname else None,
         'companyName': csv_data.get('Company') if csv_data.get('Company') else None
@@ -116,7 +119,7 @@ def map_csv_to_contact_data_bom_treated(csv_data):
 # Function to add or update a contact
 def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
     headers = {
-        'Authorization': f'Bearer {token}',
+        'Authorization': 'Bearer %s' % token,
         'Content-Type': 'application/json'
     }
 
@@ -136,7 +139,11 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
         if existing_contact:
             if check_hash["HASH"] != current_hash:
                 # Update contact if hash is different
-                update_endpoint = f'https://graph.microsoft.com/v1.0/users/{SHARED_MAILBOX_EMAIL}/contactFolders/{folder_id}/contacts/{contact_id}'
+                update_endpoint = 'https://graph.microsoft.com/v1.0/users/%s/contactFolders/%s/contacts/%s' % (
+                    SHARED_MAILBOX_EMAIL,
+                    folder_id,
+                    existing_contact['id']
+                )
                 update_response = requests.patch(update_endpoint, headers=headers, json=contact_data)
                 if update_response.status_code == 200:
                     control_data = [
@@ -146,11 +153,14 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
                         } for item in control_data
                     ]
                     #print("New control_data: %s" % json.dumps(control_data, indent=2))
-                    print(f"Contact {contact_data['displayName']} successfully updated!")
+                    print("Contact %s successfully updated!" % contact_data['displayName'])
                 else:
-                    print(f"Error updating contact {contact_data['displayName']}. Status: {update_response.status_code}, Error: {update_response.text}")
+                    print("Error updating contact. Status: %s, Error: %s" % (
+                        update_response.status_code,
+                        update_response.text
+                    ))
             else:
-                print(f"Contact {contact_data['displayName']} already exists and has no changes")
+                print("Contact %s already exists and has no changes" % contact_data['displayName'])
         else:
             # Add entry if not existing on exchange
             control_data = [item for item in control_data if item['HASH'] != current_hash]
@@ -160,7 +170,7 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
         add_contact(contact_data, folder_id, control_data, current_hash)
 
 # Function to map data from the CSV adressen_exchange_online.csv to Microsoft Graph's contact format
-def map_adressen_csv_to_contact_data(csv_data):
+def map_adressen_csv(csv_data):
     # Check if the record is a separator line or invalid
     if all(v == "--------" for v in csv_data.values()):
         return None
@@ -190,10 +200,13 @@ def map_adressen_csv_to_contact_data(csv_data):
 # Helper function to add a contact
 def add_contact(contact_data, folder_id, control_data, current_hash):
     if len(batch_add) == 20:
-        send_batch_add_request(control_data)
+        batch_add_request(control_data)
     batch_add.append({
         "id": str(len(batch_add)),
-        "url": f"/users/{SHARED_MAILBOX_EMAIL}/contactFolders/{folder_id}/contacts",
+        "url": "/users/%s/contactFolders/%s/contacts" % (
+            SHARED_MAILBOX_EMAIL,
+            folder_id
+        ),
         "method": "POST",
         "body": contact_data,
         "headers": {
@@ -202,9 +215,9 @@ def add_contact(contact_data, folder_id, control_data, current_hash):
         "hash": current_hash  # Add hash to batch item
     })
 
-def send_batch_add_request(control_data):
+def batch_add_request(control_data):
     headers = {
-        'Authorization': f'Bearer {token}',
+        'Authorization': 'Bearer %s' % token,
         'Content-Type': 'application/json'
     }
     add_response = requests.post(
@@ -218,97 +231,114 @@ def send_batch_add_request(control_data):
         body = resp.get('body', {})
         if 200 <= status < 300:
             control_data.append({ "ID": body.get("id"), "HASH": batch_add[i]["hash"] })
-            print(f"Contact {body.get('displayName')} successfully added!")
+            print("Contact %s successfully added!" % body.get('displayName'))
         else:
-            pass
-            #print(f"Error adding contact {body.get('displayName')}. Status: {status}, Error: {resp.get('headers', {}).get('message', 'Unknown error')}")
+            print("Error adding contact. Status: %s, Error: %s" % (
+                status,
+                resp.get('headers', {}).get('message', 'Unknown error')
+            ))
     batch_add.clear()
 
-# Reading the CSV file and adding/updating contacts
-with open(CSV_PATH_ANSPRECHPARTNER, mode='r', encoding='utf-16-le') as csv_file:
-    reader = csv.reader(csv_file, delimiter=',')
-    headers = next(reader)  # Read headers (first row)
 
-    control_data = load_control_file()
-    folder_id = get_folder_id_by_name(SHARED_MAILBOX_EMAIL, "company contacts test")
-    if not folder_id:
-        print(f"Folder 'company contacts' not found.")
-        exit()
-    all_contacts = get_all_contacts_from_folder(folder_id)
+# Main
+def main():
 
-    ansprechpartner_data = []
-    for i, row in enumerate(reader, start=1):
-        if i == 1:  # Skip the second row (index 1)
-            continue
-        row_dict = dict(zip(headers, row))
-        ansprechpartner_data.append(row_dict)
+    # Reading the CSV file and adding/updating contacts
+    with open(CSV_PATH_ANSPRECHPARTNER, mode='r', encoding='utf-16-le') as csv_file:
+        reader = csv.reader(csv_file, delimiter=',')
+        headers = next(reader)  # Read headers (first row)
 
-    for csv_data in ansprechpartner_data:
-        contact_data = map_csv_to_contact_data_bom_treated(csv_data)
-        # Print mapped object from csv
-        #print(json.dumps(contact_data, indent=2))
-        if not contact_data:
-            continue # next entry
-        add_or_update_contact(contact_data, folder_id, control_data, all_contacts)
-        save_control_file(control_data)
+        control_data = load_control_file()
+        folder_id = get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS)
+        if not folder_id:
+            print("Folder '%s' not found." % FOLDER_CONTACTS)
+            exit()
+        all_contacts = get_all_contacts_from_folder(folder_id)
 
-    if batch_add:
-        send_batch_add_request(control_data)
+        ansprechpartner_data = []
+        for i, row in enumerate(reader, start=1):
+            if i == 1:  # Skip the second row (index 1)
+                continue
+            row_dict = dict(zip(headers, row))
+            ansprechpartner_data.append(row_dict)
 
-# Reading the CSV file adressen_exchange_online.csv and adding/updating contacts
-with open(CSV_PATH_ADRESSEN, mode='r', encoding='utf-16-le') as csv_file:
-    reader = csv.reader(csv_file, delimiter=',')
-    headers = next(reader)  # Read headers (first row)
+        for csv_data in ansprechpartner_data:
+            contact_data = map_csv(csv_data)
+            # Print mapped object from csv
+            #print(json.dumps(contact_data, indent=2))
+            if not contact_data:
+                continue # next entry
+            add_or_update_contact(contact_data, folder_id, control_data, all_contacts)
+            save_control_file(control_data)
 
-    control_data = load_control_file()
-    folder_id = get_folder_id_by_name(SHARED_MAILBOX_EMAIL, "company contacts test")
-    if not folder_id:
-        print(f"Folder 'company contacts' not found.")
-        exit()
-    all_contacts = get_all_contacts_from_folder(folder_id)
+        if batch_add:
+            batch_add_request(control_data)
 
-    adressen_data = []
-    for i, row in enumerate(reader, start=1):
-        if i == 1:  # Skip the second row (index 1)
-            continue
-        row_dict = dict(zip(headers, row))
-        adressen_data.append(row_dict)
+    # Reading the CSV file adressen_exchange_online.csv and adding/updating contacts
+    with open(CSV_PATH_ADRESSEN, mode='r', encoding='utf-16-le') as csv_file:
+        reader = csv.reader(csv_file, delimiter=',')
+        headers = next(reader)  # Read headers (first row)
 
-    for csv_data in adressen_data:
-        contact_data = map_adressen_csv_to_contact_data(csv_data)
-        # Print csv object
-        #print(json.dumps(contact_data, indent=2))
-        if not contact_data:
-            continue # next entry
-        add_or_update_contact(contact_data, folder_id, control_data, all_contacts)
-        save_control_file(control_data)
+        control_data = load_control_file()
+        folder_id = get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS)
+        if not folder_id:
+            print("Folder '%s' not found." % FOLDER_CONTACTS)
+            exit()
+        all_contacts = get_all_contacts_from_folder(folder_id)
 
-    if batch_add:
-        send_batch_add_request(control_data)
+        adressen_data = []
+        for i, row in enumerate(reader, start=1):
+            if i == 1:  # Skip the second row (index 1)
+                continue
+            row_dict = dict(zip(headers, row))
+            adressen_data.append(row_dict)
 
-# Check and remove remote contacts from exchange
-if map_hash:
-    control_data = load_control_file()
-    control_to_remove = [item for item in control_data if item['HASH'] in map_hash]
-    if control_to_remove:
-        for item in control_to_remove:
-            headers = {
-                'Authorization': f'Bearer {token}',
-                'Content-Type': 'application/json'
-            }
-            endpoint = 'https://graph.microsoft.com/v1.0/users/%s/contactFolders/%s/contacts/%s' % (
-                SHARED_MAILBOX_EMAIL,
-                get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS),
-                item['ID']
-            )
-            response = requests.delete(endpoint, headers=headers)
-            if response.status_code == 204:
-                print("Contact removed")
-            else:
-                print("Error trying to remove contact. Status: %s, Error: %s" % (
-                    response.status_code,
-                    response.text
-                ))
-        # Update local control_data
-        control_data = [item for item in control_data if item['HASH'] not in map_hash]
-        save_control_file(control_data)
+        for csv_data in adressen_data:
+            contact_data = map_adressen_csv(csv_data)
+            # Print csv object
+            #print(json.dumps(contact_data, indent=2))
+            if not contact_data:
+                continue # next entry
+            add_or_update_contact(contact_data, folder_id, control_data, all_contacts)
+            save_control_file(control_data)
+
+        if batch_add:
+            batch_add_request(control_data)
+
+    # Check and remove remote contacts from exchange
+    if map_hash:
+        control_data = load_control_file()
+        control_to_remove = [item for item in control_data if item['HASH'] in map_hash]
+        if control_to_remove:
+            for item in control_to_remove:
+                headers = {
+                    'Authorization': 'Bearer %s' % token,
+                    'Content-Type': 'application/json'
+                }
+                endpoint = 'https://graph.microsoft.com/v1.0/users/%s/contactFolders/%s/contacts/%s' % (
+                    SHARED_MAILBOX_EMAIL,
+                    get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS),
+                    item['ID']
+                )
+                response = requests.delete(endpoint, headers=headers)
+                if response.status_code == 204:
+                    print("Contact removed")
+                else:
+                    print("Error trying to remove contact. Status: %s, Error: %s" % (
+                        response.status_code,
+                        response.text
+                    ))
+            # Update local control_data
+            control_data = [item for item in control_data if item['HASH'] not in map_hash]
+            save_control_file(control_data)
+
+
+if __name__ == "__main__":
+    # variable Initialization
+    batch_add = []
+    map_hash = []
+    # Authentication and token retrieval
+    credential = ClientSecretCredential(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, tenant_id=TENANT_ID)
+    token = credential.get_token('https://graph.microsoft.com/.default').token1
+    # start
+    main()
