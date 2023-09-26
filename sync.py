@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import logging as log
 import json
 import requests
 from azure.identity import ClientSecretCredential
@@ -15,6 +16,7 @@ FOLDER_CONTACTS = 'company contacts test'
 CSV_PATH_ANSPRECHPARTNER = 'ansprechpartner_exchange_online.csv'
 CSV_PATH_ADRESSEN = 'adressen_exchange_online.csv'
 CONTROL_FILE = 'contacts_control.json'
+LOG_FILENAME = 'sync.log'
 
 
 # Function to load the control file
@@ -72,8 +74,62 @@ def get_folder_id_by_name(mailbox_email, folder_name):
         return None
 
 
+# Function to add or update a contact
+def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
+    headers = {
+        'Authorization': 'Bearer %s' % token,
+        'Content-Type': 'application/json'
+    }
+
+    # Generate hash for the current contact
+    current_hash = generate_md5_hash(contact_data)
+    map_hash.append(current_hash)
+    #print("Current HASH: %s" % current_hash)
+
+    check_hash = ([x for x in control_data if x['HASH'] == current_hash] + [None])[0]
+
+    if check_hash:
+        # Check if the contact with the associated ID still exists
+        existing_contact = next(
+            (contact for contact in all_contacts if contact["id"] == check_hash["ID"]),
+            None
+        )
+        if existing_contact:
+            if check_hash["HASH"] != current_hash:
+                # Update contact if hash is different
+                update_endpoint = 'https://graph.microsoft.com/v1.0/users/%s/contactFolders/%s/contacts/%s' % (
+                    SHARED_MAILBOX_EMAIL,
+                    folder_id,
+                    existing_contact['id']
+                )
+                update_response = requests.patch(update_endpoint, headers=headers, json=contact_data)
+                if update_response.status_code == 200:
+                    control_data = [
+                        {
+                            'ID': item['ID'],
+                            'HASH': current_hash if item['ID'] == check_hash["ID"] else item['HASH']
+                        } for item in control_data
+                    ]
+                    #print("New control_data: %s" % json.dumps(control_data, indent=2))
+                    log.info("Contact %s successfully updated!" % contact_data['displayName'])
+                else:
+                    log.critical("Error updating contact. Status: %s, Error: %s" % (
+                        update_response.status_code,
+                        update_response.text
+                    ))
+            else:
+                log.warning("Contact %s already exists and has no changes" % contact_data['displayName'])
+        else:
+            # Add entry if not existing on exchange
+            control_data = [item for item in control_data if item['HASH'] != current_hash]
+            add_contact(contact_data, folder_id, control_data, current_hash)
+    else:
+        # Add the contact if it's not in our control file
+        add_contact(contact_data, folder_id, control_data, current_hash)
+
+
 # Function to map CSV data to Microsoft Graph's contact format
-def map_csv(csv_data):
+def map_ansprechpartner_csv(csv_data):
     # Check if the record is a separator line or invalid
     if all(v == "--------" for v in csv_data.values()):
         return None
@@ -116,58 +172,6 @@ def map_csv(csv_data):
 
     return mapped_data
 
-# Function to add or update a contact
-def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
-    headers = {
-        'Authorization': 'Bearer %s' % token,
-        'Content-Type': 'application/json'
-    }
-
-    # Generate hash for the current contact
-    current_hash = generate_md5_hash(contact_data)
-    map_hash.append(current_hash)
-    #print("Current HASH: %s" % current_hash)
-
-    check_hash = ([x for x in control_data if x['HASH'] == current_hash] + [None])[0]
-
-    if check_hash:
-        # Check if the contact with the associated ID still exists
-        existing_contact = next(
-            (contact for contact in all_contacts if contact["id"] == check_hash["ID"]),
-            None
-        )
-        if existing_contact:
-            if check_hash["HASH"] != current_hash:
-                # Update contact if hash is different
-                update_endpoint = 'https://graph.microsoft.com/v1.0/users/%s/contactFolders/%s/contacts/%s' % (
-                    SHARED_MAILBOX_EMAIL,
-                    folder_id,
-                    existing_contact['id']
-                )
-                update_response = requests.patch(update_endpoint, headers=headers, json=contact_data)
-                if update_response.status_code == 200:
-                    control_data = [
-                        {
-                            'ID': item['ID'],
-                            'HASH': current_hash if item['ID'] == check_hash["ID"] else item['HASH']
-                        } for item in control_data
-                    ]
-                    #print("New control_data: %s" % json.dumps(control_data, indent=2))
-                    print("Contact %s successfully updated!" % contact_data['displayName'])
-                else:
-                    print("Error updating contact. Status: %s, Error: %s" % (
-                        update_response.status_code,
-                        update_response.text
-                    ))
-            else:
-                print("Contact %s already exists and has no changes" % contact_data['displayName'])
-        else:
-            # Add entry if not existing on exchange
-            control_data = [item for item in control_data if item['HASH'] != current_hash]
-            add_contact(contact_data, folder_id, control_data, current_hash)
-    else:
-        # Add the contact if it's not in our control file
-        add_contact(contact_data, folder_id, control_data, current_hash)
 
 # Function to map data from the CSV adressen_exchange_online.csv to Microsoft Graph's contact format
 def map_adressen_csv(csv_data):
@@ -231,9 +235,9 @@ def batch_add_request(control_data):
         body = resp.get('body', {})
         if 200 <= status < 300:
             control_data.append({ "ID": body.get("id"), "HASH": batch_add[i]["hash"] })
-            print("Contact %s successfully added!" % body.get('displayName'))
+            log.info("Contact %s successfully added!" % body.get('displayName'))
         else:
-            print("Error adding contact. Status: %s, Error: %s" % (
+            log.critical("Error adding contact. Status: %s, Error: %s" % (
                 status,
                 resp.get('headers', {}).get('message', 'Unknown error')
             ))
@@ -245,13 +249,14 @@ def main():
 
     # Reading the CSV file and adding/updating contacts
     with open(CSV_PATH_ANSPRECHPARTNER, mode='r', encoding='utf-16-le') as csv_file:
+        log.info("Processing CSV file %s" % CSV_PATH_ANSPRECHPARTNER)
         reader = csv.reader(csv_file, delimiter=',')
         headers = next(reader)  # Read headers (first row)
 
         control_data = load_control_file()
         folder_id = get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS)
         if not folder_id:
-            print("Folder '%s' not found." % FOLDER_CONTACTS)
+            log.critical("Folder '%s' not found." % FOLDER_CONTACTS)
             exit()
         all_contacts = get_all_contacts_from_folder(folder_id)
 
@@ -263,7 +268,7 @@ def main():
             ansprechpartner_data.append(row_dict)
 
         for csv_data in ansprechpartner_data:
-            contact_data = map_csv(csv_data)
+            contact_data = map_ansprechpartner_csv(csv_data)
             # Print mapped object from csv
             #print(json.dumps(contact_data, indent=2))
             if not contact_data:
@@ -276,13 +281,14 @@ def main():
 
     # Reading the CSV file adressen_exchange_online.csv and adding/updating contacts
     with open(CSV_PATH_ADRESSEN, mode='r', encoding='utf-16-le') as csv_file:
+        log.info("Processing CSV file %s" % CSV_PATH_ADRESSEN)
         reader = csv.reader(csv_file, delimiter=',')
         headers = next(reader)  # Read headers (first row)
 
         control_data = load_control_file()
         folder_id = get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS)
         if not folder_id:
-            print("Folder '%s' not found." % FOLDER_CONTACTS)
+            log.critical("Folder '%s' not found." % FOLDER_CONTACTS)
             exit()
         all_contacts = get_all_contacts_from_folder(folder_id)
 
@@ -322,9 +328,9 @@ def main():
                 )
                 response = requests.delete(endpoint, headers=headers)
                 if response.status_code == 204:
-                    print("Contact removed")
+                    log.info("Contact removed")
                 else:
-                    print("Error trying to remove contact. Status: %s, Error: %s" % (
+                    log.critical("Error trying to remove contact. Status: %s, Error: %s" % (
                         response.status_code,
                         response.text
                     ))
@@ -337,6 +343,12 @@ if __name__ == "__main__":
     # variable Initialization
     batch_add = []
     map_hash = []
+    log.basicConfig(
+        filename=LOG_FILENAME,
+        level=log.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%d/%m/%Y %H:%M:%S'
+    )
     # Authentication and token retrieval
     credential = ClientSecretCredential(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, tenant_id=TENANT_ID)
     token = credential.get_token('https://graph.microsoft.com/.default').token1
