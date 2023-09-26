@@ -351,6 +351,6 @@ if __name__ == "__main__":
     )
     # Authentication and token retrieval
     credential = ClientSecretCredential(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, tenant_id=TENANT_ID)
-    token = credential.get_token('https://graph.microsoft.com/.default').token1
+    token = credential.get_token('https://graph.microsoft.com/.default').token
     # start
     main()
