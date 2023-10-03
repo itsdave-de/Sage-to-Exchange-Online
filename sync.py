@@ -314,7 +314,7 @@ def main():
     # Check and remove remote contacts from exchange
     if map_hash:
         control_data = load_control_file()
-        control_to_remove = [item for item in control_data if item['HASH'] in map_hash]
+        control_to_remove = [item for item in control_data if item['HASH'] not in map_hash]
         if control_to_remove:
             for item in control_to_remove:
                 headers = {
