@@ -18,6 +18,7 @@ CSV_PATH_ADRESSEN = 'adressen_exchange_online.csv'
 CONTROL_FILE = 'contacts_control.json'
 LOG_FILENAME = 'sync.log'
 
+MSGRAPH_URL = 'https://graph.microsoft.com/beta'
 
 # Function to load the control file
 def load_control_file():
@@ -35,9 +36,10 @@ def save_control_file(data):
 # Function to get all contacts from the folder
 def get_all_contacts_from_folder(folder_id):
     headers = {
-        'Authorization': 'Bearer %' % token
+        'Authorization': 'Bearer %s' % token
     }
-    endpoint = 'https://graph.microsoft.com/v1.0/users/%s/contactFolders/%s/contacts?$select=id&$top=1000' % (
+    endpoint = '%s/users/%s/contactFolders/%s/contacts?$select=id&$top=1000' % (
+        MSGRAPH_URL,
         SHARED_MAILBOX_EMAIL,
         folder_id
     )
@@ -62,7 +64,8 @@ def get_folder_id_by_name(mailbox_email, folder_name):
     headers = {
         'Authorization': 'Bearer %s' % token
     }
-    endpoint = 'https://graph.microsoft.com/v1.0/users/%s/contactFolders?$filter=displayName eq \'%s\'' % (
+    endpoint = '%s/users/%s/contactFolders?$filter=displayName eq \'%s\'' % (
+        MSGRAPH_URL,
         mailbox_email,
         folder_name
     )
@@ -74,8 +77,19 @@ def get_folder_id_by_name(mailbox_email, folder_name):
         return None
 
 
-# Function to add or update a contact
 def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
+    """
+    Adds or updates a contact in the specified folder on the Exchange server.
+
+    Args:
+        contact_data (dict): The contact data to add or update.
+        folder_id (str): The ID of the folder to add or update the contact in.
+        control_data (list): A list of dictionaries containing control data for the contacts.
+        all_contacts (list): A list of all contacts in the specified folder.
+
+    Returns:
+        None
+    """
     headers = {
         'Authorization': 'Bearer %s' % token,
         'Content-Type': 'application/json'
@@ -97,7 +111,8 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
         if existing_contact:
             if check_hash["HASH"] != current_hash:
                 # Update contact if hash is different
-                update_endpoint = 'https://graph.microsoft.com/v1.0/users/%s/contactFolders/%s/contacts/%s' % (
+                update_endpoint = '%s/users/%s/contactFolders/%s/contacts/%s' % (
+                    MSGRAPH_URL,
                     SHARED_MAILBOX_EMAIL,
                     folder_id,
                     existing_contact['id']
@@ -201,8 +216,20 @@ def map_adressen_csv(csv_data):
 
     return mapped_data
 
-# Helper function to add a contact
+
 def add_contact(contact_data, folder_id, control_data, current_hash):
+    """
+    Adds a contact to the specified folder.
+
+    Args:
+        contact_data (dict): A dictionary containing the contact's data.
+        folder_id (str): The ID of the folder to add the contact to.
+        control_data (dict): A dictionary containing control data for the batch request.
+        current_hash (str): The current hash value.
+
+    Returns:
+        None
+    """
     if len(batch_add) == 20:
         batch_add_request(control_data)
     batch_add.append({
@@ -220,12 +247,20 @@ def add_contact(contact_data, folder_id, control_data, current_hash):
     })
 
 def batch_add_request(control_data):
+    """
+    Sends a batch request to add multiple contacts to Microsoft Graph API.
+
+    Args:
+        control_data (list): A list of dictionaries containing the ID and HASH of each added contact.
+
+    Returns:
+        None
+    """
     headers = {
         'Authorization': 'Bearer %s' % token,
         'Content-Type': 'application/json'
     }
-    add_response = requests.post(
-        'https://graph.microsoft.com/v1.0/$batch',
+    add_response = requests.post('%s/$batch' % MSGRAPH_URL,
         headers=headers,
         json={ "requests": [item for item in batch_add if "url" in item] }
     )
@@ -321,7 +356,8 @@ def main():
                     'Authorization': 'Bearer %s' % token,
                     'Content-Type': 'application/json'
                 }
-                endpoint = 'https://graph.microsoft.com/v1.0/users/%s/contactFolders/%s/contacts/%s' % (
+                endpoint = '%s/users/%s/contactFolders/%s/contacts/%s' % (
+                    MSGRAPH_URL,
                     SHARED_MAILBOX_EMAIL,
                     get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS),
                     item['ID']
