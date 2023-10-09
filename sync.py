@@ -35,7 +35,7 @@ def save_control_file(data):
 # Function to get all contacts from the folder
 def get_all_contacts_from_folder(folder_id):
     headers = {
-        'Authorization': 'Bearer %' % token
+        'Authorization': 'Bearer %s' % token
     }
     endpoint = 'https://graph.microsoft.com/v1.0/users/%s/contactFolders/%s/contacts?$select=id&$top=1000' % (
         SHARED_MAILBOX_EMAIL,
