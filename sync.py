@@ -152,9 +152,31 @@ def map_ansprechpartner_csv(csv_data):
     phones = []
     for phone_field in ['Business', 'Business2', 'BusinessFax']:
         if csv_data.get(phone_field) and len(phones) < 2:  # Limit 2 values
-            phones.append(csv_data[phone_field])
+            phones.append(
+                { 
+                    "type": "business",
+                    "number": csv_data[phone_field] if csv_data.get(phone_field) else None
+                }
+            )
     
-    last_name = csv_data.get('LastName', "")
+    if csv_data.get('mobilePhone') and len(phones) < 2:  # Limit 2 values
+        phones.append(
+            {
+                "type": "mobile",
+                "number": csv_data['mobilePhone'] if csv_data.get('mobilePhone') else None
+            }
+        )
+
+
+    if csv_data.get('Mobile') and len(phones) < 2:  # Limit 2 values
+        phones.append(
+            {
+                "type": "mobile",
+                "number": csv_data['Mobile'] if csv_data.get('Mobile') else None
+            }
+        )
+
+    last_name = csv_data.get('LastName', "") if csv_data.get('LastName') else csv_data.get('FirstName', "")
     if last_name:
         given_name = last_name.split(' ')[0] if ' ' in last_name else last_name
         surname = ' '.join(last_name.split(' ')[1:]) if ' ' in last_name else ""
@@ -162,7 +184,7 @@ def map_ansprechpartner_csv(csv_data):
         given_name = ""
         surname = ""
     mapped_data = {
-        'displayName': (last_name or "%s %s" % (given_name, surname).strip()).replace(";", ""),
+        'displayName': (last_name or ("%s %s" % (given_name, surname)).strip()).replace(";", ""),
         'givenName': given_name if given_name else None,
         'surname': surname if surname else None,
         'companyName': csv_data.get('Company') if csv_data.get('Company') else None
@@ -173,10 +195,7 @@ def map_ansprechpartner_csv(csv_data):
         mapped_data['emailAddresses'] = [{'address': csv_data['Email']}]
     
     if phones:
-        mapped_data['businessPhones'] = phones
-    
-    if csv_data.get('Mobile'):
-        mapped_data['mobilePhone'] = csv_data['Mobile']
+        mapped_data['phones'] = phones
 
     # Remove any fields with value None
     mapped_data = {k: v for k, v in mapped_data.items() if v is not None}
@@ -196,21 +215,60 @@ def map_adressen_csv(csv_data):
 
     # Mapping CSV fields to the contact format
     mapped_data = {
-        'displayName': csv_data['USER_ADRAenderungsdatumDat'].replace(";", "") if csv_data.get('USER_ADRAenderungsdatumDat') else None,
+        #'displayName': csv_data['USER_ADRAenderungsdatumDat'].replace(";", "") if csv_data.get('USER_ADRAenderungsdatumDat') else None,
         'companyName': csv_data['Company'].replace(";", "") if csv_data.get('Company') else None,
-        'address': {
+        'postalAddresses': [{
             'street': csv_data['LieferStrasse'] if csv_data.get('LieferStrasse') else None,
             'city': csv_data['LieferOrt'] if csv_data.get('LieferOrt') else None,
             'postalCode': csv_data['LieferPLZ'] if csv_data.get('LieferPLZ') else None,
-            'country': csv_data['Lieferland'] if csv_data.get('Lieferland') else None
-        },
-        'businessPhones': [csv_data['Business']] if csv_data.get('Business') else [],
-        'businessFax': csv_data['BusinessFax'] if csv_data.get('BusinessFax') else None,
-        'mobilePhone': csv_data['Mobile'] if csv_data.get('Mobile') else None,
-        'emailAddresses': [{'address': csv_data['Email']}] if csv_data.get('Email') else [],
-        'website': csv_data['Homepage'] if csv_data.get('Homepage') else None
+            'countryOrRegion': csv_data['Lieferland'] if csv_data.get('Lieferland') else None,
+            'type': 'business'
+        }] if csv_data.get('LieferStrasse') else None,
+        'emailAddresses': [
+            {
+                'address': csv_data['Email'] if csv_data.get('Email') else None,
+                'type': 'work',
+                'name': csv_data['Company'] if csv_data.get('Company') else None
+            }
+        ] if csv_data.get('Email') else [],
+        'websites': [
+            {
+                'type': 'work',
+                'address': csv_data['Homepage']
+            }
+        ] if csv_data.get('Homepage') else [],
     }
-    
+
+    # Check if the phone is not empty before adding it
+    phones = []
+    for phone_field in ['Business', 'Business2', 'BusinessFax']:
+        if csv_data.get(phone_field) and len(phones) < 2:  # Limit 2 values
+            phones.append(
+                { 
+                    "type": "business",
+                    "number": csv_data[phone_field] if csv_data.get(phone_field) else None
+                }
+            )
+    # Check if the mobile phone is not empty before adding it
+    if csv_data.get('mobilePhone') and len(phones) < 2:  # Limit 2 values
+        phones.append(
+            {
+                "type": "mobile",
+                "number": csv_data['mobilePhone'] if csv_data.get('mobilePhone') else None
+            }
+        )
+    # Check if the mobile phone is not empty before adding it
+    if csv_data.get('Mobile') and len(phones) < 2:  # Limit 2 values
+        phones.append(
+            {
+                "type": "mobile",
+                "number": csv_data['Mobile'] if csv_data.get('Mobile') else None
+            }
+        )
+    # Check if the phone is not empty before adding it
+    if phones:
+        mapped_data['phones'] = phones
+
     # Remove any fields with value None
     mapped_data = {k: v for k, v in mapped_data.items() if v is not None}
 
@@ -276,6 +334,7 @@ def batch_add_request(control_data):
                 status,
                 resp.get('headers', {}).get('message', 'Unknown error')
             ))
+            print(resp)
     batch_add.clear()
 
 
@@ -313,7 +372,7 @@ def main():
 
         if batch_add:
             batch_add_request(control_data)
-
+            
     # Reading the CSV file adressen_exchange_online.csv and adding/updating contacts
     with open(CSV_PATH_ADRESSEN, mode='r', encoding='utf-16-le') as csv_file:
         log.info("Processing CSV file %s" % CSV_PATH_ADRESSEN)
