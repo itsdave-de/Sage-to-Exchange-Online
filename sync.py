@@ -6,6 +6,11 @@ import requests
 from azure.identity import ClientSecretCredential
 import hashlib
 import csv
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 
 # Settings
 CLIENT_ID = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
@@ -19,6 +24,13 @@ CONTROL_FILE = 'contacts_control.json'
 LOG_FILENAME = 'sync.log'
 
 MSGRAPH_URL = 'https://graph.microsoft.com/beta'
+
+# Email settings
+SENDER_EMAIL = 'your_email@domain.com'
+SENDER_PASSWORD = 'your_password'
+RECIPIENT_EMAIL = 'recipient_email@domain.com'
+SMTP_SERVER = 'smtp.domain.com'
+SMTP_PORT = 587
 
 # Function to load the control file
 def load_control_file():
@@ -337,6 +349,33 @@ def batch_add_request(control_data):
             print(resp)
     batch_add.clear()
 
+# Function to send email with attachment (log file)
+def send_email_with_attachment():
+    msg = MIMEMultipart()
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = RECIPIENT_EMAIL
+    msg['Subject'] = 'Notification of execution of syncronization and log activity'
+
+    body = 'Sincronization executed with sucessuful\n\nPlease find attached the log file from the execution of script.'
+    msg.attach(MIMEText(body, 'plain'))
+
+    with open(LOG_FILENAME, 'rb') as attachment_file:
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(attachment_file.read())
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', f'attachment; filename={LOG_FILENAME}')
+        msg.attach(part)
+
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.sendmail(SENDER_EMAIL, RECIPIENT_EMAIL, msg.as_string())
+        server.quit()
+        print("Email sent successfully!")
+    except Exception as e:
+        print(f"Failed to send email. Error: {e}")
+
 
 # Main
 def main():
@@ -449,3 +488,6 @@ if __name__ == "__main__":
     token = credential.get_token('https://graph.microsoft.com/.default').token
     # start
     main()
+
+    # Send email with log file
+    send_email_with_attachment()
