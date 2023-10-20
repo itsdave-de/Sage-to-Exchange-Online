@@ -27,7 +27,7 @@ LOG_FILENAME = 'sync.log'
 MSGRAPH_URL = 'https://graph.microsoft.com/beta'
 
 # Email settings
-EMAIL_SEND = False
+EMAIL_SEND = False # Make it True to send email with log file
 SENDER_EMAIL = 'your_email@domain.com'
 SENDER_PASSWORD = 'your_password'
 RECIPIENT_EMAIL = 'recipient_email@domain.com'
@@ -148,7 +148,7 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
                         update_response.text
                     ))
             else:
-                log.warning("Contact %s already exists and has no changes" % contact_data['displayName'])
+                log.info("Contact %s already exists and has no changes" % contact_data['displayName'])
         else:
             # Add entry if not existing on exchange
             control_data = [item for item in control_data if item['HASH'] != current_hash]
