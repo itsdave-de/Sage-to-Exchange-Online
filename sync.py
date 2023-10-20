@@ -2,6 +2,7 @@
 
 import logging as log
 import json
+import os
 import requests
 from azure.identity import ClientSecretCredential
 import hashlib
@@ -26,6 +27,7 @@ LOG_FILENAME = 'sync.log'
 MSGRAPH_URL = 'https://graph.microsoft.com/beta'
 
 # Email settings
+EMAIL_SEND = False
 SENDER_EMAIL = 'your_email@domain.com'
 SENDER_PASSWORD = 'your_password'
 RECIPIENT_EMAIL = 'recipient_email@domain.com'
@@ -111,6 +113,7 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
     current_hash = generate_md5_hash(contact_data)
     map_hash.append(current_hash)
     #print("Current HASH: %s" % current_hash)
+    print(f"Tamanho atual de map_hash: {len(map_hash)}")
 
     check_hash = ([x for x in control_data if x['HASH'] == current_hash] + [None])[0]
 
@@ -381,73 +384,82 @@ def send_email_with_attachment():
 def main():
 
     # Reading the CSV file and adding/updating contacts
-    with open(CSV_PATH_ANSPRECHPARTNER, mode='r', encoding='utf-16-le') as csv_file:
-        log.info("Processing CSV file %s" % CSV_PATH_ANSPRECHPARTNER)
-        reader = csv.reader(csv_file, delimiter=',')
-        headers = next(reader)  # Read headers (first row)
+    if os.path.exists(CSV_PATH_ANSPRECHPARTNER):
+        with open(CSV_PATH_ANSPRECHPARTNER, mode='r', encoding='utf-16-le') as csv_file:
+            log.info("Processing CSV file %s" % CSV_PATH_ANSPRECHPARTNER)
+            reader = csv.reader(csv_file, delimiter=',')
+            headers = next(reader)  # Read headers (first row)
 
-        control_data = load_control_file()
-        folder_id = get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS)
-        if not folder_id:
-            log.critical("Folder '%s' not found." % FOLDER_CONTACTS)
-            exit()
-        all_contacts = get_all_contacts_from_folder(folder_id)
+            control_data = load_control_file()
+            folder_id = get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS)
+            if not folder_id:
+                log.critical("Folder '%s' not found." % FOLDER_CONTACTS)
+                exit()
+            all_contacts = get_all_contacts_from_folder(folder_id)
 
-        ansprechpartner_data = []
-        for i, row in enumerate(reader, start=1):
-            if i == 1:  # Skip the second row (index 1)
-                continue
-            row_dict = dict(zip(headers, row))
-            ansprechpartner_data.append(row_dict)
+            ansprechpartner_data = []
+            for i, row in enumerate(reader, start=1):
+                if i == 1:  # Skip the second row (index 1)
+                    continue
+                row_dict = dict(zip(headers, row))
+                ansprechpartner_data.append(row_dict)
 
-        for csv_data in ansprechpartner_data:
-            contact_data = map_ansprechpartner_csv(csv_data)
-            # Print mapped object from csv
-            #print(json.dumps(contact_data, indent=2))
-            if not contact_data:
-                continue # next entry
-            add_or_update_contact(contact_data, folder_id, control_data, all_contacts)
-            save_control_file(control_data)
+            for csv_data in ansprechpartner_data:
+                contact_data = map_ansprechpartner_csv(csv_data)
+                # Print mapped object from csv
+                #print(json.dumps(contact_data, indent=2))
+                if not contact_data:
+                    continue # next entry
+                add_or_update_contact(contact_data, folder_id, control_data, all_contacts)
+                save_control_file(control_data)
 
-        if batch_add:
-            batch_add_request(control_data)
+            if batch_add:
+                batch_add_request(control_data)
+    else:
+        log.warning(f"File {CSV_PATH_ANSPRECHPARTNER} not found.")
+
             
     # Reading the CSV file adressen_exchange_online.csv and adding/updating contacts
-    with open(CSV_PATH_ADRESSEN, mode='r', encoding='utf-16-le') as csv_file:
-        log.info("Processing CSV file %s" % CSV_PATH_ADRESSEN)
-        reader = csv.reader(csv_file, delimiter=',')
-        headers = next(reader)  # Read headers (first row)
+    if os.path.exists(CSV_PATH_ADRESSEN):
+        with open(CSV_PATH_ADRESSEN, mode='r', encoding='utf-16-le') as csv_file:
+            log.info("Processing CSV file %s" % CSV_PATH_ADRESSEN)
+            reader = csv.reader(csv_file, delimiter=',')
+            headers = next(reader)  # Read headers (first row)
 
-        control_data = load_control_file()
-        folder_id = get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS)
-        if not folder_id:
-            log.critical("Folder '%s' not found." % FOLDER_CONTACTS)
-            exit()
-        all_contacts = get_all_contacts_from_folder(folder_id)
+            control_data = load_control_file()
+            folder_id = get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS)
+            if not folder_id:
+                log.critical("Folder '%s' not found." % FOLDER_CONTACTS)
+                exit()
+            all_contacts = get_all_contacts_from_folder(folder_id)
 
-        adressen_data = []
-        for i, row in enumerate(reader, start=1):
-            if i == 1:  # Skip the second row (index 1)
-                continue
-            row_dict = dict(zip(headers, row))
-            adressen_data.append(row_dict)
+            adressen_data = []
+            for i, row in enumerate(reader, start=1):
+                if i == 1:  # Skip the second row (index 1)
+                    continue
+                row_dict = dict(zip(headers, row))
+                adressen_data.append(row_dict)
 
-        for csv_data in adressen_data:
-            contact_data = map_adressen_csv(csv_data)
-            # Print csv object
-            #print(json.dumps(contact_data, indent=2))
-            if not contact_data:
-                continue # next entry
-            add_or_update_contact(contact_data, folder_id, control_data, all_contacts)
-            save_control_file(control_data)
+            for csv_data in adressen_data:
+                contact_data = map_adressen_csv(csv_data)
+                # Print csv object
+                #print(json.dumps(contact_data, indent=2))
+                if not contact_data:
+                    continue # next entry
+                add_or_update_contact(contact_data, folder_id, control_data, all_contacts)
+                save_control_file(control_data)
 
-        if batch_add:
-            batch_add_request(control_data)
+            if batch_add:
+                batch_add_request(control_data)
+    else:
+        log.warning(f"File {CSV_PATH_ADRESSEN} not found.")
 
     # Check and remove remote contacts from exchange
     if map_hash:
+        print(f"Removendo contatos remotos, tamanho atual de map_hash: {len(map_hash)}")
         control_data = load_control_file()
         control_to_remove = [item for item in control_data if item['HASH'] not in map_hash]
+        print(f"Quantidade de contatos a serem removidos: {len(control_to_remove)}")
         if control_to_remove:
             for item in control_to_remove:
                 headers = {
@@ -462,15 +474,14 @@ def main():
                 )
                 response = requests.delete(endpoint, headers=headers)
                 if response.status_code == 204:
-                    log.info("Contact removed")
+                    log.info(f"Contact with ID {item['ID']} removed")
                 else:
                     log.critical("Error trying to remove contact. Status: %s, Error: %s" % (
                         response.status_code,
                         response.text
                     ))
             # Update local control_data
-            control_data = [item for item in control_data if item['HASH'] not in map_hash]
-            save_control_file(control_data)
+            save_control_file(control_to_remove)
 
 
 if __name__ == "__main__":
@@ -490,4 +501,5 @@ if __name__ == "__main__":
     main()
 
     # Send email with log file
-    send_email_with_attachment()
+    if EMAIL_SEND:
+        send_email_with_attachment()
