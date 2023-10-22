@@ -110,10 +110,13 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
     }
 
     # Generate hash for the current contact
+    print(f"Structure of contact_data:\n%s\n-----------------\n" % json.dumps(contact_data, indent=2))
     current_hash = generate_md5_hash(contact_data)
+    print(f"Hash generate: {current_hash}\n\n====================\n\n")
+
     map_hash.append(current_hash)
     #print("Current HASH: %s" % current_hash)
-    print(f"Tamanho atual de map_hash: {len(map_hash)}")
+    print(f"Actual size of map_hash: {len(map_hash)}")
 
     check_hash = ([x for x in control_data if x['HASH'] == current_hash] + [None])[0]
 
@@ -148,7 +151,11 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
                         update_response.text
                     ))
             else:
-                log.info("Contact %s already exists and has no changes" % contact_data['displayName'])
+                log.info("%s" % (
+                    f"Contact {contact_data['displayName']} already exists and has no changes" if (
+                        contact_data.get('displayName') 
+                    ) else "Contact already exists and has no changes"
+                ))
         else:
             # Add entry if not existing on exchange
             control_data = [item for item in control_data if item['HASH'] != current_hash]
