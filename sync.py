@@ -29,6 +29,8 @@ MSGRAPH_URL = 'https://graph.microsoft.com/beta'
 
 # Email settings
 EMAIL_SEND = False # Make it True to send email with log file
+USE_SSL = True  # Use SSL/TLS for email sending
+USE_AUTHENTICATION = True  # Use authentication for email sending
 SENDER_EMAIL = 'your_email@domain.com'
 SENDER_PASSWORD = 'your_password'
 RECIPIENT_EMAIL = 'recipient_email@domain.com'
@@ -385,9 +387,9 @@ def send_email_with_attachment():
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
     msg['To'] = RECIPIENT_EMAIL
-    msg['Subject'] = 'Notification of execution of syncronization and log activity'
+    msg['Subject'] = 'Notification of execution of synchronization and log activity'
 
-    body = 'Sincronization executed with sucessuful\n\nPlease find attached the log file from the execution of script.'
+    body = 'Synchronization executed successfully\n\nPlease find attached the log file from the execution of the script.'
     msg.attach(MIMEText(body, 'plain'))
 
     with open(LOG_FILENAME, 'rb') as attachment_file:
@@ -398,14 +400,21 @@ def send_email_with_attachment():
         msg.attach(part)
 
     try:
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        if USE_SSL:
+            server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT)
+        else:
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            server.starttls()
+        
+        if USE_AUTHENTICATION:
+            server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        
         server.sendmail(SENDER_EMAIL, RECIPIENT_EMAIL, msg.as_string())
         server.quit()
-        print("Email sent successfully!")
+        log.info("Email sent successfully!")
     except Exception as e:
-        print(f"Failed to send email. Error: {e}")
+        log.error(f"Failed to send email. Error: {e}")
+
 
 
 # Main
