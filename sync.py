@@ -7,6 +7,7 @@ import requests
 from azure.identity import ClientSecretCredential
 import hashlib
 import csv
+import sqlite3
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -36,16 +37,48 @@ SMTP_PORT = 587
 
 # Function to load the control file
 def load_control_file():
-    try:
-        with open(CONTROL_FILE, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return []
+    conn = sqlite3.connect(CONTROL_FILE)
+    c = conn.cursor()
+
+    # Create table if not exists
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS control_data (
+        id INTEGER PRIMARY KEY,
+        contact_id TEXT NOT NULL,
+        hash TEXT NOT NULL
+    )
+    ''')
+
+    # Load existing data
+    c.execute('SELECT * FROM control_data')
+    control_data = [{'contact_id': row[1], 'hash': row[2]} for row in c.fetchall()]
+
+    conn.close()
+    return control_data
+
 
 # Function to save the control file
-def save_control_file(data):
-    with open(CONTROL_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+def save_control_data(data):
+    conn = sqlite3.connect(CONTROL_FILE)
+    c = conn.cursor()
+
+    # Insere ou atualiza os dados
+    for item in data:
+        # Verifica se o registro já existe
+        c.execute('SELECT * FROM control_data WHERE contact_id = ?', (item['contact_id'],))
+        existing_data = c.fetchone()
+
+        if existing_data:
+            # Atualiza o registro se o hash for diferente
+            if item['hash'] != existing_data[2]:
+                c.execute('UPDATE control_data SET hash = ? WHERE contact_id = ?', (item['hash'], item['contact_id']))
+        else:
+            # Insere o registro se não existir
+            c.execute('INSERT INTO control_data (contact_id, hash) VALUES (?, ?)', (item['contact_id'], item['hash']))
+
+    conn.commit()
+    conn.close()
+
 
 # Function to get all contacts from the folder
 def get_all_contacts_from_folder(folder_id):
@@ -118,16 +151,16 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
     #print("Current HASH: %s" % current_hash)
     print(f"Actual size of map_hash: {len(map_hash)}")
 
-    check_hash = ([x for x in control_data if x['HASH'] == current_hash] + [None])[0]
+    check_hash = ([x for x in control_data if x['hash'] == current_hash] + [None])[0]
 
     if check_hash:
         # Check if the contact with the associated ID still exists
         existing_contact = next(
-            (contact for contact in all_contacts if contact["id"] == check_hash["ID"]),
+            (contact for contact in all_contacts if contact["id"] == check_hash["contact_id"]),
             None
         )
         if existing_contact:
-            if check_hash["HASH"] != current_hash:
+            if check_hash["hash"] != current_hash:
                 # Update contact if hash is different
                 update_endpoint = '%s/users/%s/contactFolders/%s/contacts/%s' % (
                     MSGRAPH_URL,
@@ -137,12 +170,7 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
                 )
                 update_response = requests.patch(update_endpoint, headers=headers, json=contact_data)
                 if update_response.status_code == 200:
-                    control_data = [
-                        {
-                            'ID': item['ID'],
-                            'HASH': current_hash if item['ID'] == check_hash["ID"] else item['HASH']
-                        } for item in control_data
-                    ]
+                    save_control_data([{"contact_id": check_hash["contact_id"], "hash": current_hash}])
                     #print("New control_data: %s" % json.dumps(control_data, indent=2))
                     log.info("Contact %s successfully updated!" % contact_data['displayName'])
                 else:
@@ -158,7 +186,7 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
                 ))
         else:
             # Add entry if not existing on exchange
-            control_data = [item for item in control_data if item['HASH'] != current_hash]
+            save_control_data([{"contact_id": check_hash["contact_id"], "hash": current_hash}])
             add_contact(contact_data, folder_id, control_data, current_hash)
     else:
         # Add the contact if it's not in our control file
@@ -167,10 +195,7 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
 
 # Function to map CSV data to Microsoft Graph's contact format
 def map_ansprechpartner_csv(csv_data):
-    # Check if the record is a separator line or invalid
-    if all(v == "--------" for v in csv_data.values()):
-        return None
-
+    # Mapping CSV fields to the contact format
     phones = []
     for phone_field in ['Business', 'Business2', 'BusinessFax']:
         if csv_data.get(phone_field) and len(phones) < 2:  # Limit 2 values
@@ -231,10 +256,6 @@ def map_ansprechpartner_csv(csv_data):
 
 # Function to map data from the CSV adressen_exchange_online.csv to Microsoft Graph's contact format
 def map_adressen_csv(csv_data):
-    # Check if the record is a separator line or invalid
-    if all(v == "--------" for v in csv_data.values()):
-        return None
-
     # Mapping CSV fields to the contact format
     mapped_data = {
         #'displayName': csv_data['USER_ADRAenderungsdatumDat'].replace(";", "") if csv_data.get('USER_ADRAenderungsdatumDat') else None,
@@ -349,7 +370,7 @@ def batch_add_request(control_data):
         status = resp.get('status', 0)
         body = resp.get('body', {})
         if 200 <= status < 300:
-            control_data.append({ "ID": body.get("id"), "HASH": batch_add[i]["hash"] })
+            save_control_data([{"contact_id": body.get("id"), "hash": batch_add[i]["hash"]}])
             log.info("Contact %s successfully added!" % body.get('displayName'))
         else:
             log.critical("Error adding contact. Status: %s, Error: %s" % (
@@ -392,10 +413,9 @@ def main():
 
     # Reading the CSV file and adding/updating contacts
     if os.path.exists(CSV_PATH_ANSPRECHPARTNER):
-        with open(CSV_PATH_ANSPRECHPARTNER, mode='r', encoding='utf-16-le') as csv_file:
+        with open(CSV_PATH_ANSPRECHPARTNER, mode='r', newline='', encoding='utf-16-le') as csv_file:
             log.info("Processing CSV file %s" % CSV_PATH_ANSPRECHPARTNER)
-            reader = csv.reader(csv_file, delimiter=',')
-            headers = next(reader)  # Read headers (first row)
+            reader = csv.DictReader(csv_file, delimiter=',')
 
             control_data = load_control_file()
             folder_id = get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS)
@@ -406,10 +426,8 @@ def main():
 
             ansprechpartner_data = []
             for i, row in enumerate(reader, start=1):
-                if i == 1:  # Skip the second row (index 1)
-                    continue
-                row_dict = dict(zip(headers, row))
-                ansprechpartner_data.append(row_dict)
+                if row['Company'] != None:
+                    ansprechpartner_data.append(row)
 
             for csv_data in ansprechpartner_data:
                 contact_data = map_ansprechpartner_csv(csv_data)
@@ -418,7 +436,6 @@ def main():
                 if not contact_data:
                     continue # next entry
                 add_or_update_contact(contact_data, folder_id, control_data, all_contacts)
-                save_control_file(control_data)
 
             if batch_add:
                 batch_add_request(control_data)
@@ -428,10 +445,9 @@ def main():
             
     # Reading the CSV file adressen_exchange_online.csv and adding/updating contacts
     if os.path.exists(CSV_PATH_ADRESSEN):
-        with open(CSV_PATH_ADRESSEN, mode='r', encoding='utf-16-le') as csv_file:
+        with open(CSV_PATH_ADRESSEN, mode='r', newline='', encoding='utf-16-le') as csv_file:
             log.info("Processing CSV file %s" % CSV_PATH_ADRESSEN)
-            reader = csv.reader(csv_file, delimiter=',')
-            headers = next(reader)  # Read headers (first row)
+            reader = csv.DictReader(csv_file, delimiter=',')
 
             control_data = load_control_file()
             folder_id = get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS)
@@ -442,10 +458,8 @@ def main():
 
             adressen_data = []
             for i, row in enumerate(reader, start=1):
-                if i == 1:  # Skip the second row (index 1)
-                    continue
-                row_dict = dict(zip(headers, row))
-                adressen_data.append(row_dict)
+                if row['Company'] != None:
+                    adressen_data.append(row)
 
             for csv_data in adressen_data:
                 contact_data = map_adressen_csv(csv_data)
@@ -454,7 +468,6 @@ def main():
                 if not contact_data:
                     continue # next entry
                 add_or_update_contact(contact_data, folder_id, control_data, all_contacts)
-                save_control_file(control_data)
 
             if batch_add:
                 batch_add_request(control_data)
@@ -465,7 +478,7 @@ def main():
     if map_hash:
         print(f"Removendo contatos remotos, tamanho atual de map_hash: {len(map_hash)}")
         control_data = load_control_file()
-        control_to_remove = [item for item in control_data if item['HASH'] not in map_hash]
+        control_to_remove = [item for item in control_data if item['hash'] not in map_hash]
         print(f"Quantidade de contatos a serem removidos: {len(control_to_remove)}")
         if control_to_remove:
             for item in control_to_remove:
@@ -481,14 +494,14 @@ def main():
                 )
                 response = requests.delete(endpoint, headers=headers)
                 if response.status_code == 204:
-                    log.info(f"Contact with ID {item['ID']} removed")
+                    log.info(f"Contact with ID {item['contact_id']} removed")
                 else:
                     log.critical("Error trying to remove contact. Status: %s, Error: %s" % (
                         response.status_code,
                         response.text
                     ))
             # Update local control_data
-            save_control_file(control_to_remove)
+            save_control_data(control_to_remove)
 
 
 if __name__ == "__main__":
