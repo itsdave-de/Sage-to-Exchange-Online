@@ -200,28 +200,23 @@ def map_ansprechpartner_csv(csv_data):
     # Mapping CSV fields to the contact format
     phones = []
     for phone_field in ['Business', 'Business2', 'BusinessFax']:
-        if csv_data.get(phone_field) and len(phones) < 2:  # Limit 2 values
+        if csv_data.get(phone_field) and len(
+            [p for p in phones if p.get('type') == 'business']
+        ) <= 2:  # Limit 2 values
             phones.append(
                 { 
                     "type": "business",
-                    "number": csv_data[phone_field] if csv_data.get(phone_field) else None
+                    "number": csv_data.get(phone_field)
                 }
             )
     
-    if csv_data.get('mobilePhone') and len(phones) < 2:  # Limit 2 values
+    if (csv_data.get('mobilePhone') or csv_data.get('Mobile')) and len(
+        [p for p in phones if p.get('type') == 'mobile']
+    ) <= 2:  # Limit 2 values
         phones.append(
             {
                 "type": "mobile",
-                "number": csv_data['mobilePhone'] if csv_data.get('mobilePhone') else None
-            }
-        )
-
-
-    if csv_data.get('Mobile') and len(phones) < 2:  # Limit 2 values
-        phones.append(
-            {
-                "type": "mobile",
-                "number": csv_data['Mobile'] if csv_data.get('Mobile') else None
+                "number": csv_data.get('mobilePhone')
             }
         )
 
@@ -236,7 +231,7 @@ def map_ansprechpartner_csv(csv_data):
         'displayName': (last_name or ("%s %s" % (given_name, surname)).strip()).replace(";", ""),
         'givenName': given_name if given_name else None,
         'surname': surname if surname else None,
-        'companyName': csv_data.get('Company') if csv_data.get('Company') else None
+        'companyName': csv_data.get('Company')
     }
     
     # Check if the email is not empty before adding it
@@ -252,6 +247,70 @@ def map_ansprechpartner_csv(csv_data):
     # Validate the fields before returning
     if not mapped_data['displayName']:
         mapped_data['displayName'] = "Unknown"  # or any other default value
+
+    return mapped_data
+
+
+# Function to map data from the CSV adressen_exchange_online.csv to Microsoft Graph's contact format
+def map_adressen_csv(csv_data):
+    # Mapping CSV fields to the contact format
+    mapped_data = {
+        #'displayName': csv_data['USER_ADRAenderungsdatumDat'].replace(";", "") if csv_data.get('USER_ADRAenderungsdatumDat') else None,
+        'companyName': csv_data['Company'].replace(";", "") if csv_data.get('Company') else None,
+        'postalAddresses': [{
+            'street': csv_data.get('LieferStrasse'),
+            'city': csv_data.get('LieferOrt'),
+            'postalCode': csv_data.get('LieferPLZ'),
+            'countryOrRegion': csv_data.get('Lieferland'),
+            'type': 'business'
+        }] if csv_data.get('LieferStrasse') else [],
+        'emailAddresses': [
+            {
+                'address': csv_data.get('Email'),
+                'type': 'work',
+                'name': csv_data.get('Company')
+            }
+        ] if csv_data.get('Email') else [],
+        'websites': [
+            {
+                'type': 'work',
+                'address': csv_data.get('Homepage')
+            }
+        ] if csv_data.get('Homepage') else [],
+    }
+
+    # Check if the phone is not empty before adding it
+    phones = []
+    for phone_field in ['Business', 'Business2', 'BusinessFax']:
+        if csv_data.get(phone_field) and len(phones) < 2:  # Limit 2 values
+            phones.append(
+                { 
+                    "type": "business",
+                    "number": csv_data[phone_field] if csv_data.get(phone_field) else None
+                }
+            )
+    # Check if the mobile phone is not empty before adding it
+    if csv_data.get('mobilePhone') and len(phones) < 2:  # Limit 2 values
+        phones.append(
+            {
+                "type": "mobile",
+                "number": csv_data['mobilePhone'] if csv_data.get('mobilePhone') else None
+            }
+        )
+    # Check if the mobile phone is not empty before adding it
+    if csv_data.get('Mobile') and len(phones) < 2:  # Limit 2 values
+        phones.append(
+            {
+                "type": "mobile",
+                "number": csv_data['Mobile'] if csv_data.get('Mobile') else None
+            }
+        )
+    # Check if the phone is not empty before adding it
+    if phones:
+        mapped_data['phones'] = phones
+
+    # Remove any fields with value None
+    mapped_data = {k: v for k, v in mapped_data.items() if v is not None}
 
     return mapped_data
 
