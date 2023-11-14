@@ -103,9 +103,11 @@ def get_all_contacts_from_folder(folder_id):
 
 # Function to generate an MD5 hash
 def generate_md5_hash(entry):
-    """Generate MD5 hash from the contact dict entry"""
+    # Create a dictionary from the contact entry with only the non-empty and non-'NULL' values
+    values_string = {key: value for key, value in entry.items() if value and value != 'NULL'}
+    # Return the MD5 hash of the stringified dictionary
     return hashlib.md5(
-        json.dumps(entry).encode()
+        json.dumps(values_string, sort_keys=True).encode()
     ).hexdigest()
 
 
