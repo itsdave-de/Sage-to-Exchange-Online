@@ -3,6 +3,7 @@
 import logging as log
 import json
 import os
+import time
 import requests
 from azure.identity import ClientSecretCredential
 import hashlib
@@ -36,6 +37,12 @@ SENDER_PASSWORD = 'your_password'
 RECIPIENT_EMAIL = 'recipient_email@domain.com'
 SMTP_SERVER = 'smtp.domain.com'
 SMTP_PORT = 587
+
+# Initialize the statistics variables
+contacts_added = 0
+contacts_updated = 0
+contacts_removed = 0
+start_time = time.time()  # Record the start time of the script
 
 # Function to load the control file
 def load_control_file():
@@ -141,6 +148,8 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
     Returns:
         None
     """
+    global contacts_added, contacts_updated
+
     headers = {
         'Authorization': 'Bearer %s' % token,
         'Content-Type': 'application/json'
@@ -176,6 +185,7 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
                 if update_response.status_code == 200:
                     save_control_data([{"contact_id": check_hash["contact_id"], "hash": current_hash}])
                     #print("New control_data: %s" % json.dumps(control_data, indent=2))
+                    contacts_updated += 1  # Increment the contacts updated count
                     log.info("Contact %s successfully updated!" % contact_data['displayName'])
                 else:
                     log.critical("Error updating contact. Status: %s, Error: %s" % (
@@ -191,6 +201,7 @@ def add_or_update_contact(contact_data, folder_id, control_data, all_contacts):
         else:
             # Add entry if not existing on exchange
             save_control_data([{"contact_id": check_hash["contact_id"], "hash": current_hash}])
+            contacts_added += 1  # Increment the contacts added count
             add_contact(contact_data, folder_id, control_data, current_hash)
     else:
         # Add the contact if it's not in our control file
@@ -375,22 +386,20 @@ def batch_add_request(control_data):
             print(resp)
     batch_add.clear()
 
-# Function to send email with attachment (log file)
-def send_email_with_attachment():
+# Function to send email with statistics
+def send_email_with_statistics():
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
     msg['To'] = RECIPIENT_EMAIL
-    msg['Subject'] = 'Notification of execution of synchronization and log activity'
+    msg['Subject'] = 'Summary of Contacts Synchronization'
 
-    body = 'Synchronization executed successfully\n\nPlease find attached the log file from the execution of the script.'
+    # Create the email body with the statistics
+    body = f"Synchronization executed successfully.\n\n"\
+           f"Contacts added: {contacts_added}\n"\
+           f"Contacts updated: {contacts_updated}\n"\
+           f"Contacts removed: {contacts_removed}\n"\
+           f"Execution time: {execution_time:.2f} seconds."
     msg.attach(MIMEText(body, 'plain'))
-
-    with open(LOG_FILENAME, 'rb') as attachment_file:
-        part = MIMEBase('application', 'octet-stream')
-        part.set_payload(attachment_file.read())
-        encoders.encode_base64(part)
-        part.add_header('Content-Disposition', f'attachment; filename={LOG_FILENAME}')
-        msg.attach(part)
 
     try:
         if USE_SSL:
@@ -404,14 +413,15 @@ def send_email_with_attachment():
         
         server.sendmail(SENDER_EMAIL, RECIPIENT_EMAIL, msg.as_string())
         server.quit()
-        log.info("Email sent successfully!")
+        log.info("Email with statistics sent successfully!")
     except Exception as e:
-        log.error(f"Failed to send email. Error: {e}")
-
+        log.error(f"Failed to send email with statistics. Error: {e}")
 
 
 # Main
 def main():
+
+    global contacts_removed
 
     # Reading the CSV file and adding/updating contacts
     if os.path.exists(CSV_PATH_ANSPRECHPARTNER):
@@ -478,10 +488,10 @@ def main():
 
     # Check and remove remote contacts from exchange
     if map_hash:
-        print(f"Removendo contatos remotos, tamanho atual de map_hash: {len(map_hash)}")
+        print(f"Removing remote contacts, current size of map_hash: {len(map_hash)}")
         control_data = load_control_file()
         control_to_remove = [item for item in control_data if item['hash'] not in map_hash]
-        print(f"Quantidade de contatos a serem removidos: {len(control_to_remove)}")
+        print(f"Quantity of contacts in control_data: {len(control_data)}")
         if control_to_remove:
             for item in control_to_remove:
                 headers = {
@@ -496,6 +506,7 @@ def main():
                 )
                 response = requests.delete(endpoint, headers=headers)
                 if response.status_code == 204:
+                    contacts_removed += 1 # Increment the contacts removed count
                     log.info(f"Contact with ID {item['contact_id']} removed")
                 else:
                     log.critical("Error trying to remove contact. Status: %s, Error: %s" % (
@@ -521,6 +532,8 @@ if __name__ == "__main__":
     token = credential.get_token('https://graph.microsoft.com/.default').token
     # start
     main()
+    # Calculate the script execution time
+    execution_time = time.time() - start_time  # Calculate the execution time
 
     # Send email with log file
     if EMAIL_SEND:
