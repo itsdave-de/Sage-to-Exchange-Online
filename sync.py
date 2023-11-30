@@ -494,27 +494,32 @@ def main():
         print(f"Quantity of contacts in control_data: {len(control_data)}")
         if control_to_remove:
             for item in control_to_remove:
-                headers = {
-                    'Authorization': 'Bearer %s' % token,
-                    'Content-Type': 'application/json'
-                }
-                endpoint = '%s/users/%s/contactFolders/%s/contacts/%s' % (
-                    MSGRAPH_URL,
-                    SHARED_MAILBOX_EMAIL,
-                    get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS),
-                    item['ID']
-                )
-                response = requests.delete(endpoint, headers=headers)
-                if response.status_code == 204:
-                    contacts_removed += 1 # Increment the contacts removed count
-                    log.info(f"Contact with ID {item['contact_id']} removed")
-                else:
-                    log.critical("Error trying to remove contact. Status: %s, Error: %s" % (
-                        response.status_code,
-                        response.text
-                    ))
+                try:
+                    headers = {
+                        'Authorization': 'Bearer %s' % token,
+                        'Content-Type': 'application/json'
+                    }
+                    endpoint = '%s/users/%s/contactFolders/%s/contacts/%s' % (
+                        MSGRAPH_URL,
+                        SHARED_MAILBOX_EMAIL,
+                        get_folder_id_by_name(SHARED_MAILBOX_EMAIL, FOLDER_CONTACTS),
+                        item['ID']
+                    )
+                    response = requests.delete(endpoint, headers=headers)
+                    if response.status_code == 204:
+                        contacts_removed += 1 # Increment the contacts removed count
+                        log.info(f"Contact with ID {item['contact_id']} removed")
+                    else:
+                        log.critical("Error trying to remove contact. Status: %s, Error: %s" % (
+                            response.status_code,
+                            response.text
+                        ))
+                except requests.exceptions.RequestException as e:
+                    log.critical("Error trying to remove contact. Error: %s" % e)
+
             # Update local control_data
-            save_control_data(control_to_remove)
+            control_data = [item for item in control_data if item not in control_to_remove]
+            save_control_data(control_data)
 
 
 if __name__ == "__main__":
@@ -537,4 +542,4 @@ if __name__ == "__main__":
 
     # Send email with log file
     if EMAIL_SEND:
-        send_email_with_attachment()
+        send_email_with_statistics()
